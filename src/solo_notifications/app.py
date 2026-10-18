@@ -769,6 +769,8 @@ def main() -> None:
 
     hosted = os.environ.get("NOTIFICATIONS_DB_MODE") == "hosted"
     pem = os.environ.get("NOTIFICATIONS_JWT_PUBLIC_KEY_PEM", "").strip()
+    # A second key for the same issuer during a signing-key rollover; unset = off.
+    next_pem = os.environ.get("NOTIFICATIONS_JWT_NEXT_PUBLIC_KEY_PEM", "").strip()
     issuer = os.environ.get("NOTIFICATIONS_JWT_ISSUER", "")
     platform_url = os.environ.get("EMPIRE_PLATFORM_URL", "")
     if not pem or not issuer or not platform_url:
@@ -780,7 +782,9 @@ def main() -> None:
     cluster = default_cluster()
     app = create_app(
         lambda: cluster.connect("notifications_api"),
-        TokenVerifier(pem, issuer),
+        TokenVerifier(
+            pem, issuer, extra_public_key_pems=(next_pem,) if next_pem else ()
+        ),
         HttpPlatform(platform_url),
     )
     uvicorn.run(
