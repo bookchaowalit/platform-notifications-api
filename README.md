@@ -150,6 +150,7 @@ railway up --ci --service notifications-dispatcher
 railway run --service notifications-dispatcher -- .venv/bin/notifications-dispatch --dry-run
 ```
 
-Railway variables (never in the repository): `NOTIFICATIONS_DB_MODE=hosted`,
+Railway variables (never in the repository): `SENTRY_DSN` (error reporting; unset = off,
+see `src/solo_notifications/_sentry.py`), `NOTIFICATIONS_DB_MODE=hosted`,
 `NOTIFICATIONS_DB_URL_API`, `NOTIFICATIONS_JWT_PUBLIC_KEY_PEM`,
 `NOTIFICATIONS_JWT_ISSUER`, `EMPIRE_PLATFORM_URL`.

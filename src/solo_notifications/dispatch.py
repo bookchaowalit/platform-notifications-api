@@ -44,6 +44,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from solo_notifications._sentry import capture
 from solo_notifications.tibo_reset import run_monitor as run_tibo_monitor
 
 BANGKOK = ZoneInfo("Asia/Bangkok")
@@ -389,6 +390,16 @@ def _log(event: str, **fields: Any) -> None:
     )
 
 
+_reported: set[str] = set()
+
+
+def _report_once(kind: str, exc: BaseException) -> None:
+    """Send a per-row failure to Sentry at most once per kind and run (cron: one run per process)."""
+    if kind not in _reported:
+        _reported.add(kind)
+        capture(exc)
+
+
 def _already_delivered(
     notes: Notifications, tasks: Tasks, match: dict[str, Any]
 ) -> bool:
@@ -420,6 +431,7 @@ def run_rules(
             OverflowError,
         ) as exc:  # one broken rule never blocks the rest
             counts["errors"] += 1
+            _report_once("rule_failed", exc)
             _log(
                 "rule_failed",
                 rule_id=rule.get("id"),
@@ -461,6 +473,7 @@ def run_rules(
             except ApiError as exc:
                 counts["errors"] += 1
                 failed = True
+                _report_once("queue_failed", exc)
                 _log(
                     "queue_failed",
                     rule_id=rule["id"],
@@ -558,6 +571,7 @@ def _record(
                 attempt == 2 or exc.status < 500
             ):  # keep going: the other entries were delivered too
                 counts["errors"] += 1
+                _report_once("record_failed", exc)
                 _log(
                     "record_failed",
                     notification_id=entry["id"],
@@ -602,6 +616,7 @@ def deliver(
                 send(text)
                 sent += 1
         except RuntimeError as exc:
+            _report_once("send_failed", exc)
             if sent:  # part of a long review went out: resending would repeat it
                 _log(
                     "partial_send",
@@ -629,6 +644,7 @@ def deliver(
                     )
                 except ApiError as exc:
                     counts["errors"] += 1
+                    _report_once("reminder_ack_failed", exc)
                     _log(
                         "reminder_ack_failed", task_id=e.get("task_id"), detail=str(exc)
                     )
@@ -681,16 +697,19 @@ def main(argv: list[str] | None = None) -> int:
     try:
         rules = run_rules(notes, tasks, now, dry_run=args.dry_run)
     except (ApiError, OSError, urllib.error.URLError) as exc:
+        capture(exc)
         rules["errors"] += 1
         _log("rules_failed", error=type(exc).__name__)
     try:
         monitor = run_tibo_monitor(notes, now, dry_run=args.dry_run)
     except Exception as exc:  # noqa: BLE001 - preserve existing delivery even if monitor setup fails
+        capture(exc)
         monitor["errors"] += 1
         _log("tibo_monitor_failed", error=type(exc).__name__)
     try:
         delivery = deliver(notes, send, now, dry_run=args.dry_run, tasks=tasks)
     except (ApiError, OSError, urllib.error.URLError) as exc:
+        capture(exc)
         print(
             json.dumps(
                 {
