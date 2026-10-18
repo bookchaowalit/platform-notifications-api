@@ -14,6 +14,8 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
+from solo_notifications._sentry import capture
+
 RELAY_URL = "https://codex-reset.com/api/feed"
 STATE_KEY = "tibo-reset-monitor:thsottiaux:started:v1"
 USER_AGENT = "SoloEmpireNotifications/0.1 (+https://github.com/bookchaowalit/platform-notifications-api)"
@@ -354,6 +356,7 @@ def run_monitor(
     fetch: Callable[[Settings, datetime], list[Post]] | None = None,
 ) -> dict[str, Any]:
     """Source failures and per-alert queue failures are isolated; failed writes retry next poll."""
+    reported = False
     result = {
         "enabled": False,
         "matched": 0,
@@ -401,10 +404,15 @@ def run_monitor(
                 continue
             try:
                 result["queued"] += notes.queue(_alert(post, category)) == "created"
-            except Exception:  # noqa: BLE001 - count the failure and keep queueing the other alerts
+            except Exception as exc:  # noqa: BLE001 - count the failure and keep queueing the other alerts
+                if not reported:  # one Sentry event per run, not one per alert
+                    capture(exc)
+                    reported = True
                 result["errors"] += 1
-    except Exception:  # noqa: BLE001 - the monitor must never break the dispatch run
+    except Exception as exc:  # noqa: BLE001 - the monitor must never break the dispatch run
         # Do not log exception text: sources, API clients or malformed config may carry secrets.
+        # Sentry gets it scrubbed (no locals; URL passwords, tokens and JWTs removed).
+        capture(exc)
         result["errors"] += 1
     return result
 
