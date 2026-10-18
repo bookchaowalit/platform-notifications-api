@@ -145,10 +145,15 @@ call). Errors reach the client as a fixed message from the HTTP status only (for
 uv venv .venv && uv pip install --python .venv/bin/python -e ".[dev]"
 .venv/bin/pytest -q          # add ../platform-empire[dev] for the end-to-end test
 NEON_API_KEY=... .venv/bin/notifications-db provision
-npm install && railway config apply && railway up --ci --service notifications-api
-railway up --ci --service notifications-dispatcher
+npm install && railway config apply   # service settings only; code deploys from GitHub (below)
 railway run --service notifications-dispatcher -- .venv/bin/notifications-dispatch --dry-run
 ```
+
+Deploys (CD, since 2026-10-18): `notifications-api` and `notifications-dispatcher` are
+connected to this repository's `main` with Railway's Wait for CI (`checkSuites`). A merge to
+`main` deploys only after the CI and security checks pass; a failing check leaves production on
+the previous deployment. Roll back by redeploying an earlier deployment in Railway.
+`railway up` is no longer used.
 
 Railway variables (never in the repository): `SENTRY_DSN` (error reporting; unset = off,
 see `src/solo_notifications/_sentry.py`), `NOTIFICATIONS_DB_MODE=hosted`,
