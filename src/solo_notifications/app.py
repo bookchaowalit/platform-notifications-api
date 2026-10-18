@@ -45,6 +45,7 @@ from fastapi import (
 from psycopg.rows import dict_row
 from pydantic import BaseModel, ConfigDict, Field
 
+from solo_notifications._sentry import capture
 from solo_notifications.auth import Principal, TokenVerifier, Unauthenticated
 from solo_notifications.platform import Action, Denied, Platform, PlatformUnavailable
 
@@ -378,7 +379,8 @@ def create_app(
                 execution,
                 {"status": "succeeded", "service": "notifications", **plan.audit},
             )
-        except (PlatformUnavailable, Denied):
+        except (PlatformUnavailable, Denied) as exc:
+            capture(exc)  # the write succeeded; only the audit finish failed
             log.warning(
                 json.dumps(
                     {

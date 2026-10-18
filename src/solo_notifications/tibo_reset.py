@@ -454,6 +454,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
     except Exception as exc:  # noqa: BLE001 - preview reports the error class instead of a traceback
+        capture(exc)
         print(
             json.dumps(
                 {
