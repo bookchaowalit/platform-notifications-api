@@ -63,7 +63,8 @@ class Post:
 
 def _date(value: Any) -> datetime:
     if not isinstance(value, str):
-        raise ValueError("missing timestamp")  # noqa: TRY004 - callers treat any malformed relay data as ValueError
+        # ValueError, not TypeError: callers treat any malformed relay data as ValueError.
+        raise ValueError("missing timestamp")
     stamp = datetime.fromisoformat(value.replace("Z", "+00:00"))  # noqa: FURB162 - keeps Z-normalisation; removing it changes which inputs are accepted
     if stamp.tzinfo is None:
         raise ValueError("timestamp must include timezone")
@@ -117,7 +118,11 @@ def parse_relay(payload: Any, now: datetime) -> list[Post]:
 
 
 def _get(
-    client: httpx.Client, url: str, *, token: str = "", params: dict | None = None
+    client: httpx.Client,
+    url: str,
+    *,
+    token: str = "",
+    params: dict[str, Any] | None = None,
 ) -> Any:
     headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
     if token:
@@ -177,7 +182,8 @@ def fetch_posts(
         raise ValueError("invalid X response")
     rows = payload.get("data", [])
     if not isinstance(rows, list):
-        raise ValueError("invalid X posts")  # noqa: TRY004 - callers treat any malformed X response as ValueError
+        # ValueError, not TypeError: callers treat any malformed X response as ValueError.
+        raise ValueError("invalid X posts")
     posts = []
     for row in rows:
         if not isinstance(row, dict) or row.get("author_id") != settings.user_id:
@@ -227,7 +233,9 @@ _FUTURE_ASPECT = re.compile(
 
 
 def _normalize(text: str) -> str:
-    text = text.replace("’", "'")
+    text = text.replace(
+        "\u2019", "'"
+    )  # RIGHT SINGLE QUOTATION MARK, as typed in "We've"
     text = re.sub(r"(?i)\b(\w+)n't\b", r"\1 not", text)
     text = re.sub(r"(?i)\b(we|i|you|they)'ve\b", r"\1 have", text)
     return re.sub(r"(?i)\b(we|i|you|they|he|she|it)'ll\b", r"\1 will", text)

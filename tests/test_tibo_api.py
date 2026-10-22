@@ -36,7 +36,9 @@ def test_seed_restart_dedupe_and_delivery_through_notifications_api(
     )
     notes = dispatch.Notifications(LocalHttp())
     seeded = tibo_reset.run_monitor(notes, now, env=enabled, fetch=lambda *_: [old])
-    assert seeded["initialized"] and seeded["queued"] == 0 and seeded["errors"] == 0
+    assert seeded["initialized"]
+    assert seeded["queued"] == 0
+    assert seeded["errors"] == 0
 
     # A new client has no process-local memory. It must recover the seed and dedupe
     # from the API, queue only the new post, and preserve its original source.
@@ -56,8 +58,10 @@ def test_seed_restart_dedupe_and_delivery_through_notifications_api(
     repeat = tibo_reset.run_monitor(
         restarted, now + timedelta(hours=1), env=enabled, fetch=lambda *_: [old, fresh]
     )
-    assert first["queued"] == 1 and first["errors"] == 0
-    assert repeat["queued"] == 0 and repeat["errors"] == 0
+    assert first["queued"] == 1
+    assert first["errors"] == 0
+    assert repeat["queued"] == 0
+    assert repeat["errors"] == 0
 
     sent = []
     delivery = dispatch.deliver(
@@ -67,9 +71,11 @@ def test_seed_restart_dedupe_and_delivery_through_notifications_api(
         dry_run=False,
         clock=lambda: now + timedelta(hours=1),
     )
-    assert delivery["delivered"] == 1 and len(sent) == 1
+    assert delivery["delivered"] == 1
+    assert len(sent) == 1
     assert "https://x.com/thsottiaux/status/101" in sent[0]
-    assert "ประกาศว่ารีเซ็ตแล้ว" in sent[0] and "Data: codex-reset.com" in sent[0]
+    assert "ประกาศว่ารีเซ็ตแล้ว" in sent[0]
+    assert "Data: codex-reset.com" in sent[0]
     assert (
         dispatch.deliver(
             restarted,
@@ -81,9 +87,11 @@ def test_seed_restart_dedupe_and_delivery_through_notifications_api(
         == 0
     )
     marker = restarted.lookup(tibo_reset.STATE_KEY)
-    assert marker["delivery_attempts"] == 0 and marker["delivered_at"] is None
+    assert marker["delivery_attempts"] == 0
+    assert marker["delivered_at"] is None
     entries = client.get("/v1/notifications", headers=headers).json()["items"]
     assert len(entries) == 2
     alert = next(item for item in entries if item["notification_type"] == "tibo_reset")
     assert alert["metadata"]["category"] == "confirmed"
-    assert alert["delivery_channel"] == "telegram" and alert["delivery_attempts"] == 1
+    assert alert["delivery_channel"] == "telegram"
+    assert alert["delivery_attempts"] == 1

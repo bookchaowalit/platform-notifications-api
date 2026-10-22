@@ -170,7 +170,9 @@ def test_dry_run_queues_and_touches_nothing():
     counts = dispatch.run_rules(
         notes, FakeTasks([task(1, due_date="2026-10-01")]), NOON, dry_run=True
     )
-    assert counts["matched"] == 1 and notes.entries == [] and notes.touched == []
+    assert counts["matched"] == 1
+    assert notes.entries == []
+    assert notes.touched == []
 
 
 def test_digest_delivery_quiet_hours_and_failures():
@@ -197,17 +199,15 @@ def test_digest_delivery_quiet_hours_and_failures():
             "waiting"
         ]
         == 25
-        and sent == []
     )
+    assert sent == []
     counts = dispatch.deliver(
         notes, sent.append, NOON, dry_run=False, clock=lambda: NOON
     )
     assert counts == {"delivered": 21, "failed": 0, "waiting": 4, "errors": 0}
-    assert (
-        len(sent) == 2
-        and sent[0].startswith("🔔 Solo Empire")
-        and sent[0].count("\n") == 20
-    )
+    assert len(sent) == 2
+    assert sent[0].startswith("🔔 Solo Empire")
+    assert sent[0].count("\n") == 20
     assert all(
         channel == "telegram"
         for _, outcome, channel, _ in notes.records
@@ -218,7 +218,8 @@ def test_digest_delivery_quiet_hours_and_failures():
         raise RuntimeError("telegram_http_502")
 
     failed = dispatch.deliver(notes, broken, NOON, dry_run=False, clock=lambda: NOON)
-    assert failed["failed"] == 4 and notes.records[-1][1:] == (
+    assert failed["failed"] == 4
+    assert notes.records[-1][1:] == (
         "failed",
         None,
         "telegram_http_502",
@@ -246,7 +247,8 @@ def test_main_reports_missing_config(capsys, monkeypatch):
         "NOTIFICATIONS_DISPATCH_TOKEN",
     ):
         monkeypatch.delenv(key, raising=False)
-    assert dispatch.main([]) == 2 and "missing_config" in capsys.readouterr().out
+    assert dispatch.main([]) == 2
+    assert "missing_config" in capsys.readouterr().out
 
 
 def test_long_titles_never_drop_lines_silently():
@@ -264,10 +266,8 @@ def test_long_titles_never_drop_lines_silently():
     counts = dispatch.deliver(
         notes, sent.append, NOON, dry_run=False, clock=lambda: NOON
     )
-    assert (
-        len(sent[0]) <= dispatch.MAX_MESSAGE
-        and counts["delivered"] + counts["waiting"] == 20
-    )
+    assert len(sent[0]) <= dispatch.MAX_MESSAGE
+    assert counts["delivered"] + counts["waiting"] == 20
     assert counts["delivered"] == sent[0].count(
         "\n"
     )  # every recorded entry is in the message
@@ -287,7 +287,8 @@ def test_long_reviews_are_split_not_cut():
     )
     sent = []
     dispatch.deliver(notes, sent.append, NOON, dry_run=False, clock=lambda: NOON)
-    assert len(sent) == 3 and sum(map(len, sent)) == len("Review\n\n") + 9000
+    assert len(sent) == 3
+    assert sum(map(len, sent)) == len("Review\n\n") + 9000
 
 
 def test_a_failed_record_does_not_stop_the_others(monkeypatch):
@@ -301,7 +302,8 @@ def test_a_failed_record_does_not_stop_the_others(monkeypatch):
     )
     notes.broken = {2}
     counts = dispatch.deliver(notes, [].append, NOON, dry_run=False, clock=lambda: NOON)
-    assert counts["errors"] == 1 and [e["delivered_at"] for e in notes.entries] == [
+    assert counts["errors"] == 1
+    assert [e["delivered_at"] for e in notes.entries] == [
         "now",
         None,
         "now",
@@ -319,7 +321,8 @@ def test_a_broken_rule_config_is_skipped():
     counts = dispatch.run_rules(
         notes, FakeTasks([task(1, status="blocked")]), NOON, dry_run=False
     )
-    assert counts["queued"] == 1 and counts["errors"] == 0
+    assert counts["queued"] == 1
+    assert counts["errors"] == 0
 
 
 def test_delivered_reminders_are_acknowledged_on_the_task():
@@ -340,7 +343,8 @@ def test_quiet_hours_are_checked_before_each_message():
     counts = dispatch.deliver(
         notes, [].append, NOON, dry_run=False, clock=lambda: NIGHT
     )
-    assert counts["delivered"] == 0 and counts["waiting"] == 1
+    assert counts["delivered"] == 0
+    assert counts["waiting"] == 1
 
 
 def test_a_malformed_bot_token_is_refused_without_echo(capsys):
@@ -357,7 +361,8 @@ def test_a_failed_queue_keeps_the_rule_due():
     counts = dispatch.run_rules(
         notes, FakeTasks([task(1, status="blocked")]), NOON, dry_run=False
     )
-    assert counts["errors"] == 1 and notes.touched == []
+    assert counts["errors"] == 1
+    assert notes.touched == []
 
 
 def test_a_lost_reminder_ack_is_retried_without_resending():
@@ -370,7 +375,8 @@ def test_a_lost_reminder_ack_is_retried_without_resending():
     later = NOON + dispatch.timedelta(days=1)
     notes.rules_list[0]["last_checked_at"] = None
     counts = dispatch.run_rules(notes, tasks, later, dry_run=False)
-    assert counts["queued"] == 0 and len(notes.entries) == 1
+    assert counts["queued"] == 0
+    assert len(notes.entries) == 1
     assert tasks.acks == [("uuid-7", "2026-10-10T04:00:00+00:00", "telegram")]
 
 
@@ -413,6 +419,5 @@ def test_platform_check_is_sent_as_its_own_message():
     counts = dispatch.deliver(
         notes, sent.append, NOON, dry_run=False, clock=lambda: NOON
     )
-    assert counts["delivered"] == 1 and sent == [
-        "Tasks platform: warning\n\n- warn token_expiring"
-    ]
+    assert counts["delivered"] == 1
+    assert sent == ["Tasks platform: warning\n\n- warn token_expiring"]

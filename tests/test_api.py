@@ -40,19 +40,16 @@ def test_rules_lifecycle(client, token, owner, platform):
             "legacy_id": 1,
         },
     ).json()
-    assert (
-        rule["config"] == {}
-        and rule["channels"] == ["console", "telegram"]
-        and rule["is_active"] is True
-    )
+    assert rule["config"] == {}
+    assert rule["channels"] == ["console", "telegram"]
+    assert rule["is_active"] is True
     checked = client.patch(
         f"/v1/notification-rules/{rule['id']}",
         headers=headers,
         json={"last_checked_at": "2026-10-10T08:00:00+00:00", "expected_version": 1},
     ).json()
-    assert checked["version"] == 2 and checked["last_checked_at"].startswith(
-        "2026-10-10"
-    )
+    assert checked["version"] == 2
+    assert checked["last_checked_at"].startswith("2026-10-10")
     assert client.get(
         "/v1/notification-rules", headers=headers, params={"active": True}
     ).json()["items"]
@@ -78,11 +75,10 @@ def test_queueing_is_idempotent_by_dedupe_key(client, token, owner, platform):
     key = f"task:7:{uuid.uuid4().hex}"
     first = queue(client, headers, dedupe_key=key)
     again = queue(client, headers, dedupe_key=key, message="different text")
-    assert first.status_code == 201 and first.json()["outcome"] == "created"
-    assert (
-        again.json()["outcome"] == "existing"
-        and again.json()["notification"]["id"] == first.json()["notification"]["id"]
-    )
+    assert first.status_code == 201
+    assert first.json()["outcome"] == "created"
+    assert again.json()["outcome"] == "existing"
+    assert again.json()["notification"]["id"] == first.json()["notification"]["id"]
     assert again.json()["notification"]["message"] == "Pay the invoice"
     executions = [
         e
@@ -133,9 +129,8 @@ def test_delivery_results(client, token, owner):
             "max_attempts": 3,
         },
     ).json()["items"]
-    assert [p["id"] for p in pending] == [entry["id"]] and pending[0]["metadata"] == {
-        "review": 3
-    }
+    assert [p["id"] for p in pending] == [entry["id"]]
+    assert pending[0]["metadata"] == {"review": 3}
     assert (
         client.post(
             path, headers=headers, json={"outcome": "delivered", "channel": "console"}
@@ -152,7 +147,8 @@ def test_delivery_results(client, token, owner):
     ) == (2, None, "telegram")
     assert done["delivered_at"] is not None
     console = client.post(path, headers=headers, json={"outcome": "console"}).json()
-    assert console["channel"] == "console" and console["delivery_attempts"] == 2
+    assert console["channel"] == "console"
+    assert console["delivery_attempts"] == 2
 
 
 def test_filters_and_stats(client, token, owner):
@@ -229,4 +225,5 @@ def test_existing_entry_is_returned_only_to_readers(client, token, owner, platfo
         "notifications.notification:write"
     }  # may queue, may not read
     probe = queue(client, token(writer, owner[1]), dedupe_key=key)
-    assert probe.status_code == 404 and "secret" not in probe.text
+    assert probe.status_code == 404
+    assert "secret" not in probe.text

@@ -46,7 +46,7 @@ def feed(*tweets, **extra):
 
 
 @pytest.mark.parametrize(
-    "text,want",
+    ("text", "want"),
     [
         ("Day 10/ Reset", "promised"),
         (
@@ -97,18 +97,18 @@ def test_context_reply_needs_an_accepted_parent_in_this_batch():
 
 
 @pytest.mark.parametrize(
-    "bad",
+    ("bad", "reason"),
     [
-        {"profile": {"handle": "other"}},
-        {"stale": True},
-        {"fetched_at": "2026-10-14T00:00:00Z"},
-        {"fetched_at": "bad"},
-        {"fetched_at": "2026-10-15T06:00:00"},
-        {"tweets": {}},
+        ({"profile": {"handle": "other"}}, "unexpected profile"),
+        ({"stale": True}, "invalid or stale relay"),
+        ({"fetched_at": "2026-10-14T00:00:00Z"}, "stale or in the future"),
+        ({"fetched_at": "bad"}, "Invalid isoformat string"),
+        ({"fetched_at": "2026-10-15T06:00:00"}, "must include timezone"),
+        ({"tweets": {}}, "invalid tweets"),
     ],
 )
-def test_reject_invalid_source_envelope(bad):
-    with pytest.raises(ValueError):
+def test_reject_invalid_source_envelope(bad, reason):
+    with pytest.raises(ValueError, match=reason):
         monitor().parse_relay(feed(tweet(), **bad), NOW)
 
 
@@ -138,13 +138,14 @@ def test_relay_fetch_once_bounded_json_and_no_authentication():
     with httpx.Client(transport=httpx.MockTransport(response)) as client:
         posts = m.fetch_posts(m.Settings(enabled=True), NOW, client=client)
     assert [p.id for p in posts] == ["123"]
-    assert len(seen) == 1 and str(seen[0].url) == "https://codex-reset.com/api/feed"
+    assert len(seen) == 1
+    assert str(seen[0].url) == "https://codex-reset.com/api/feed"
     assert "authorization" not in seen[0].headers
     assert seen[0].headers["user-agent"].startswith("SoloEmpireNotifications/0.1")
 
 
 @pytest.mark.parametrize(
-    "status,body",
+    ("status", "body"),
     [(302, b""), (200, b"not-json"), (200, b"x" * 1_048_577)],
     ids=["redirect", "malformed-json", "oversized"],
 )
@@ -195,10 +196,8 @@ def test_first_success_seeds_without_history_then_new_posts_queue_once():
     assert run(notes, old)["queued"] == 0
     assert len(notes.entries) == 1
     marker = notes.entries[m.STATE_KEY]
-    assert (
-        marker["notification_type"] == "tibo_reset_monitor_state"
-        and marker["channel"] == "console"
-    )
+    assert marker["notification_type"] == "tibo_reset_monitor_state"
+    assert marker["channel"] == "console"
     fresh = m.parse_relay(feed(tweet("124", at=NOW + timedelta(minutes=1))), NOW)
     assert run(notes, fresh, NOW + timedelta(minutes=30))["queued"] == 1
     assert run(notes, fresh, NOW + timedelta(hours=1))["queued"] == 0
@@ -207,7 +206,8 @@ def test_first_success_seeds_without_history_then_new_posts_queue_once():
     )
     assert "Data: codex-reset.com" in alert["message"]
     assert "https://x.com/thsottiaux/status/124" in alert["message"]
-    assert "13:01" in alert["message"] and "Day 10/ Reset" in alert["message"]
+    assert "13:01" in alert["message"]
+    assert "Day 10/ Reset" in alert["message"]
     assert "ประกาศว่าจะรีเซ็ต" in alert["message"]
 
 
@@ -215,7 +215,9 @@ def test_dry_run_reports_matches_without_any_writes_or_initialization():
     m = monitor()
     notes = Notes()
     result = run(notes, m.parse_relay(feed(tweet()), NOW), dry_run=True)
-    assert result["matched"] == 1 and result["queued"] == 0 and notes.entries == {}
+    assert result["matched"] == 1
+    assert result["queued"] == 0
+    assert notes.entries == {}
 
 
 def test_disabled_does_not_fetch_or_touch_notes():
@@ -233,7 +235,8 @@ def test_source_failure_does_not_initialize_state():
     result = monitor().run_monitor(
         notes, NOW, env={"TIBO_RESET_MONITOR_ENABLED": "1"}, fetch=broken
     )
-    assert result["errors"] == 1 and notes.entries == {}
+    assert result["errors"] == 1
+    assert notes.entries == {}
 
 
 def test_queue_failure_retries_and_old_future_posts_are_excluded():
@@ -275,11 +278,11 @@ def test_concurrent_initialization_reuses_canonical_marker():
 
 def test_explicit_x_mode_requires_credentials_and_never_falls_back():
     m = monitor()
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="requires bearer token"):
         m.Settings.from_env(
             {"TIBO_RESET_MONITOR_ENABLED": "1", "TIBO_RESET_SOURCE": "x"}
         )
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="unsupported reset source"):
         m.Settings.from_env(
             {
                 "TIBO_RESET_MONITOR_ENABLED": "1",
@@ -337,13 +340,12 @@ def test_x_mode_verifies_fixed_author_and_ignores_retweets():
     )
     with httpx.Client(transport=httpx.MockTransport(respond)) as client:
         assert [p.id for p in m.fetch_posts(settings, NOW, client=client)] == ["123"]
-    assert len(seen) == 2 and all(
-        r.headers["authorization"] == "Bearer fake-test-token" for r in seen
-    )
+    assert len(seen) == 2
+    assert all(r.headers["authorization"] == "Bearer fake-test-token" for r in seen)
 
 
 @pytest.mark.parametrize(
-    "text,want",
+    ("text", "want"),
     [
         ("I'm resetting Codex usage limits", "promised"),
         ("Codex usage limits have been reset", "confirmed"),
@@ -383,7 +385,8 @@ def test_failed_initial_queue_is_retried_without_a_historical_alert():
     assert notes.entries == {}
     notes.down = False
     result = run(notes, m.parse_relay(feed(tweet()), NOW), NOW + timedelta(minutes=30))
-    assert result["initialized"] is True and result["queued"] == 0
+    assert result["initialized"] is True
+    assert result["queued"] == 0
 
 
 def test_x_wrong_identity_stops_before_timeline_request():
@@ -399,7 +402,7 @@ def test_x_wrong_identity_stops_before_timeline_request():
 
     with (
         httpx.Client(transport=httpx.MockTransport(respond)) as client,
-        pytest.raises(ValueError),
+        pytest.raises(ValueError, match="unexpected X author"),
     ):
         m.fetch_posts(settings, NOW, client=client)
     assert len(seen) == 1
@@ -424,14 +427,14 @@ def test_public_preview_outputs_categories_without_accessing_notes_or_writes(
     monkeypatch.setattr(m, "fetch_posts", public)
     assert m.main(["--preview"]) == 0
     output = capsys.readouterr().out
-    assert (
-        '"category": "promised"' in output and "never-use-this-test-token" not in output
-    )
-    assert seen[0].source == "relay" and seen[0].bearer_token == ""
+    assert '"category": "promised"' in output
+    assert "never-use-this-test-token" not in output
+    assert seen[0].source == "relay"
+    assert seen[0].bearer_token == ""
 
 
 @pytest.mark.parametrize(
-    "text,want",
+    ("text", "want"),
     [
         (
             "Usage limits have been reset for all paid ChatGPT Work and Codex users",
@@ -534,7 +537,7 @@ def test_review_finding3_unrelated_reset_does_not_authorize_landing_reply(text):
 
 
 @pytest.mark.parametrize(
-    "text,category,future_label,completed_label",
+    ("text", "category", "future_label", "completed_label"),
     [
         (
             "We will, as promised, have reset usage limits by tomorrow",
@@ -602,7 +605,7 @@ def test_product_mention_does_not_authorize_unrelated_reset_or_reply(text):
 
 
 @pytest.mark.parametrize(
-    "text,want",
+    ("text", "want"),
     [
         ("We will reset usage limits on May 1", "promised"),
         ("We have reset usage limits on May 1", "confirmed"),
@@ -621,7 +624,7 @@ def test_month_dates_modal_uncertainty_and_sentence_boundaries(text, want):
 
 @pytest.mark.parametrize("joiner", [", but", " and"])
 @pytest.mark.parametrize(
-    "predicate,category,completed_label,future_label",
+    ("predicate", "category", "completed_label", "future_label"),
     [
         ("have reset usage limits", "confirmed", "ประกาศว่ารีเซ็ตแล้ว", "ประกาศว่าจะรีเซ็ต"),
         (

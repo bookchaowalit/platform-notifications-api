@@ -41,7 +41,8 @@ import urllib.parse
 import urllib.request
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from http.client import HTTPMessage
+from typing import IO, Any
 from zoneinfo import ZoneInfo
 
 from solo_notifications._sentry import capture
@@ -64,8 +65,14 @@ QUIET = (22, 7)  # from 22:00 until 07:00 Bangkok time
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(
-        self, req, fp, code, msg, headers, newurl
-    ):  # never forward a token
+        self,
+        req: urllib.request.Request,
+        fp: IO[bytes],
+        code: int,
+        msg: str,
+        headers: HTTPMessage,
+        newurl: str,
+    ) -> urllib.request.Request | None:  # never forward a token
         return None
 
 
@@ -90,7 +97,11 @@ class Http:
         self.opener = urllib.request.build_opener(_NoRedirect)
 
     def call(
-        self, method: str, path: str, body: Any = None, params: dict | None = None
+        self,
+        method: str,
+        path: str,
+        body: Any = None,
+        params: dict[str, Any] | None = None,
     ) -> Any:
         clean = {k: v for k, v in (params or {}).items() if v is not None}
         query = f"?{urllib.parse.urlencode(clean, doseq=True)}" if clean else ""
@@ -153,15 +164,16 @@ class Notifications:
         self.http = http
 
     def rules(self) -> list[dict[str, Any]]:
-        return self.http.call(
+        items: list[dict[str, Any]] = self.http.call(
             "GET", "/v1/notification-rules", params={"active": "true"}
         )["items"]
+        return items
 
     def touch_rule(self, rule_id: int, fields: dict[str, Any]) -> None:
         self.http.call("PATCH", f"/v1/notification-rules/{rule_id}", fields)
 
     def queue(self, fields: dict[str, Any]) -> str:
-        return self.http.call("POST", "/v1/notifications", fields)["outcome"]
+        return str(self.http.call("POST", "/v1/notifications", fields)["outcome"])
 
     def lookup(self, key: str) -> dict[str, Any] | None:
         items = self.http.call(
@@ -170,7 +182,7 @@ class Notifications:
         return items[0] if items else None
 
     def pending(self, kinds: list[str], since: str) -> list[dict[str, Any]]:
-        return self.http.call(
+        items: list[dict[str, Any]] = self.http.call(
             "GET",
             "/v1/notifications",
             params={
@@ -182,9 +194,10 @@ class Notifications:
                 "limit": 500,
             },
         )["items"]
+        return items
 
     def delivered_reminders(self, task_id: int) -> list[dict[str, Any]]:
-        return self.http.call(
+        items: list[dict[str, Any]] = self.http.call(
             "GET",
             "/v1/notifications",
             params={
@@ -195,6 +208,7 @@ class Notifications:
                 "limit": 50,
             },
         )["items"]
+        return items
 
     def record(
         self,
@@ -220,7 +234,8 @@ def _clip(text: str, limit: int) -> str:
 
 def _number(config: dict[str, Any], key: str, default: int, top: int) -> int:
     try:
-        value = int(config.get(key) if config.get(key) is not None else default)
+        raw = config.get(key)
+        value = int(raw if raw is not None else default)
     except (TypeError, ValueError, OverflowError):
         return default
     return value if 0 < value <= top else default
@@ -315,12 +330,14 @@ def evaluate(rule: dict[str, Any], tasks: Tasks, now: datetime) -> list[dict[str
             for t in sorted(rows, key=lambda t: (t["priority"], t["due_date"] or ""))
         ]
     if kind == "stale":
-        cutoff = (now - timedelta(days=_number(config, "days", 7, 3650))).isoformat()
+        stale_before = (
+            now - timedelta(days=_number(config, "days", 7, 3650))
+        ).isoformat()
         rows = [
             t
             for t in tasks.list(status=["todo", "in_progress"])
             if (t["status"] == "in_progress" or t["due_date"])
-            and (not t.get("updated_at") or str(t["updated_at"]) < cutoff)
+            and (not t.get("updated_at") or str(t["updated_at"]) < stale_before)
         ]
         return [
             _entry(
@@ -511,7 +528,8 @@ ICONS = {
 
 def digest(entries: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], str]:
     """The entries that fit in one message, and the message. Only these count as delivered."""
-    lines, taken = [], []
+    lines: list[str] = []
+    taken: list[dict[str, Any]] = []
     for e in entries[:MAX_PER_DIGEST]:
         due_text = f" (due {e['task_due_date']})" if e.get("task_due_date") else ""
         line = f"{ICONS.get(e['notification_type'], '•')} {_clip(e.get('task_title') or e['title'], 200)}{due_text}"

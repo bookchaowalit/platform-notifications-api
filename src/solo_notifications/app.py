@@ -25,11 +25,11 @@ import logging
 import os
 import re
 import uuid
-from collections.abc import Callable, Iterator
+from collections.abc import Awaitable, Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, cast
 
 import psycopg
 from fastapi import (
@@ -38,6 +38,7 @@ from fastapi import (
     Header,
     HTTPException,
     Query,
+    Response,
 )
 from fastapi import (
     Request as HttpRequest,
@@ -244,14 +245,17 @@ class Plan:
 
 
 def create_app(
-    connect: Callable[[], psycopg.Connection],
+    connect: Callable[[], psycopg.Connection[Any]],
     verifier: TokenVerifier,
     platform: Platform,
 ) -> FastAPI:
     app = FastAPI(title="Notifications API", version="1.0.0", description=__doc__)
 
     @app.middleware("http")
-    async def correlate(request: HttpRequest, call_next):
+    async def correlate(
+        request: HttpRequest,
+        call_next: Callable[[HttpRequest], Awaitable[Response]],
+    ) -> Response:
         given = request.headers.get("x-correlation-id", "")
         token = correlation_id.set(
             given if CORRELATION.match(given) else uuid.uuid4().hex
@@ -278,7 +282,7 @@ def create_app(
     Caller = Annotated[Principal, Depends(principal)]
 
     @contextmanager
-    def bound(caller: Principal) -> Iterator[psycopg.Connection]:
+    def bound(caller: Principal) -> Iterator[psycopg.Connection[Any]]:
         try:
             conn = connect()
         except psycopg.OperationalError as exc:
@@ -324,7 +328,7 @@ def create_app(
 
     def write(
         caller: Principal,
-        op: Callable[[psycopg.Connection], Plan],
+        op: Callable[[psycopg.Connection[Any]], Plan],
         *,
         precheck: tuple[str, str, str],
     ) -> Any:
@@ -392,7 +396,11 @@ def create_app(
         return plan.result
 
     def audit(
-        entity: str, verb: str, record_id: int, before: dict | None, after: dict | None
+        entity: str,
+        verb: str,
+        record_id: int,
+        before: dict[str, Any] | None,
+        after: dict[str, Any] | None,
     ) -> dict[str, Any]:
         return {
             "action": f"notifications.{entity}.{verb}",
@@ -413,7 +421,8 @@ def create_app(
         caller: Caller, active: bool | None = None, rule_type: RuleType | None = None
     ) -> Items:
         allow(caller, "notifications.rule:read", "rule")
-        where, params = ["TRUE"], []
+        where: list[str] = ["TRUE"]
+        params: list[Any] = []
         if active is not None:
             where.append("is_active = %s")
             params.append(active)
@@ -473,7 +482,7 @@ def create_app(
             if v is not None
         }
 
-        def op(conn: psycopg.Connection) -> Plan:
+        def op(conn: psycopg.Connection[Any]) -> Plan:
             columns, params = (
                 ["workspace_id", *data],
                 [caller.workspace, *data.values()],
@@ -481,11 +490,15 @@ def create_app(
             if body.legacy_id is not None:
                 columns.append("legacy_id")
                 params.append(body.legacy_id)
-            row = conn.execute(
-                f"INSERT INTO notifications.rules ({', '.join(columns)})"
-                f" VALUES ({', '.join(['%s'] * len(columns))}) RETURNING {RULE_SELECT}",
-                params,
-            ).fetchone()
+            # INSERT ... RETURNING always yields the new row.
+            row = cast(
+                "dict[str, Any]",
+                conn.execute(
+                    f"INSERT INTO notifications.rules ({', '.join(columns)})"
+                    f" VALUES ({', '.join(['%s'] * len(columns))}) RETURNING {RULE_SELECT}",
+                    params,
+                ).fetchone(),
+            )
             return Plan(
                 "notifications.rule:write",
                 "rule",
@@ -502,7 +515,7 @@ def create_app(
     def update_rule(rule_id: int, body: RuleUpdate, caller: Caller) -> Rule:
         data = rule_values(body, body.model_fields_set - {"expected_version"})
 
-        def op(conn: psycopg.Connection) -> Plan:
+        def op(conn: psycopg.Connection[Any]) -> Plan:
             # nosemgrep: python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query -- table/column names are module constants or spec-validated identifiers; values are bound as %s parameters
             before = conn.execute(
                 f"SELECT {RULE_SELECT} FROM notifications.rules WHERE id = %s FOR UPDATE",
@@ -558,7 +571,8 @@ def create_app(
         offset: Annotated[int, Query(ge=0)] = 0,
     ) -> Items:
         allow(caller, "notifications.notification:read", "notification")
-        where, params = ["TRUE"], []
+        where: list[str] = ["TRUE"]
+        params: list[Any] = []
         if notification_type:
             where.append("notification_type = ANY(%s)")
             params.append(list(notification_type))
@@ -636,7 +650,7 @@ def create_app(
             json.dumps(data["metadata"]) if data["metadata"] is not None else None
         )
 
-        def op(conn: psycopg.Connection) -> Plan:
+        def op(conn: psycopg.Connection[Any]) -> Plan:
             if body.dedupe_key:
                 # nosemgrep: python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query -- table/column names are module constants or spec-validated identifiers; values are bound as %s parameters
                 existing = conn.execute(
@@ -671,10 +685,14 @@ def create_app(
             ).fetchone()
             if row is None:
                 # nosemgrep: python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query -- table/column names are module constants or spec-validated identifiers; values are bound as %s parameters
-                existing = conn.execute(
-                    f"SELECT {LOG_SELECT} FROM notifications.log WHERE dedupe_key = %s",
-                    (body.dedupe_key,),
-                ).fetchone()
+                # The insert lost to a committed entry with this key, so it is visible now.
+                existing = cast(
+                    "dict[str, Any]",
+                    conn.execute(
+                        f"SELECT {LOG_SELECT} FROM notifications.log WHERE dedupe_key = %s",
+                        (body.dedupe_key,),
+                    ).fetchone(),
+                )
                 allow(
                     caller,
                     "notifications.notification:read",
@@ -712,7 +730,7 @@ def create_app(
                 detail={"error": "invalid_value", "reason": "console_is_not_delivery"},
             )
 
-        def op(conn: psycopg.Connection) -> Plan:
+        def op(conn: psycopg.Connection[Any]) -> Plan:
             # nosemgrep: python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query -- table/column names are module constants or spec-validated identifiers; values are bound as %s parameters
             before = conn.execute(
                 f"SELECT {LOG_SELECT} FROM notifications.log WHERE id = %s FOR UPDATE",

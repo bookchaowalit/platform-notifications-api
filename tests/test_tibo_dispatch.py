@@ -35,9 +35,8 @@ def test_reset_alert_is_separate_quiet_hours_apply_and_state_is_never_delivered(
         ]
         == 1
     )
-    assert (
-        sent == ["Tibo\n\nreset original"] and notes.entries[0]["delivered_at"] is None
-    )
+    assert sent == ["Tibo\n\nreset original"]
+    assert notes.entries[0]["delivered_at"] is None
 
 
 def test_dedupe_lookup_passes_exact_key_without_fetching_full_log():
@@ -83,6 +82,7 @@ def test_source_and_task_rule_outages_do_not_prevent_pending_delivery(
     sent = []
     monkeypatch.setattr(dispatch, "telegram_sender", lambda *args: sent.append)
     result = dispatch.main([])
-    assert sent == ["Existing\n\nready"] and notes.entries[0]["delivered_at"] == "now"
+    assert sent == ["Existing\n\nready"]
+    assert notes.entries[0]["delivered_at"] == "now"
     assert result == 1
     assert json.loads(capsys.readouterr().out)["errors"] >= 2
