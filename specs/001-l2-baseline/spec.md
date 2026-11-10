@@ -7,7 +7,7 @@ Big Loop Plan Wave 2 (solo-empire `repository-catalog/roadmaps/BIG-LOOP-PLAN-202
 
 | Field | Value |
 |---|---|
-| Spec ID / version | SPEC-001 / 1.0 |
+| Spec ID / version | SPEC-001 / 1.1 |
 | Status | in review (implemented; owner approval pending) |
 | Repository / path | bookchaowalit/platform-notifications-api / `specs/001-l2-baseline/spec.md` |
 | Owner (maker) | Claude Code (Wave 2 cells session) |
@@ -86,11 +86,13 @@ Big Loop Plan Wave 2 (solo-empire `repository-catalog/roadmaps/BIG-LOOP-PLAN-202
 
 | Interface | Change | Contract |
 |---|---|---|
-| G | E | T |
-| G | E | T |
-| P | O | S |
-| n | o | t |
-| s | o | l |
+| `POST /v1/notifications` (queue with `dedupe_key`) | unchanged; AC-04 and AC-05 now under test | `QueueResult`: `outcome` `created`/`existing`, existing entry shown only to readers |
+| `GET /v1/notifications`, `/v1/notifications/{notification_id}`, `/v1/notifications/stats` | unchanged | same routes and payloads; see README |
+| `GET`/`POST`/`PATCH /v1/notification-rules[/{rule_id}]` | unchanged | same routes and payloads; see README |
+| `POST /v1/notifications/{notification_id}/delivery` | unchanged | same payload (`outcome`, `channel`, `error`) |
+| `notifications-dispatcher` (same image) | unchanged; AC-01, AC-02, AC-03 and AC-07 now under test | Bangkok-day dedupe, 22:00–07:00 quiet hours, Telegram-only delivery |
+| Tibo relay feed parser (`tibo_reset`) | unchanged; AC-06 now under test | `ValueError` with the specific reason |
+| Image install | `uv sync --frozen` from `uv.lock` | `Dockerfile` |
 
 - **Data model / migration:** N/A — no schema change.
 - **Backward compatibility:** same routes and payloads; only tooling, locks, typing fixes and tests changed unless a scenario above says otherwise.
@@ -136,6 +138,7 @@ Big Loop Plan Wave 2 (solo-empire `repository-catalog/roadmaps/BIG-LOOP-PLAN-202
 | Version | Date | Change | Scenarios affected | Approved by |
 |---|---|---|---|---|
 | 1.0 | 2026-10-22 | Implemented with the Wave 2 baseline | all | pending owner |
+| 1.1 | 2026-11-10 | §4 table rebuilt from the routes in `src/solo_notifications/app.py` (review 2026-10-24); no behaviour change | none | pending owner |
 
 ## Approval
 
@@ -150,3 +153,4 @@ Checker: independent Claude reviewer subagent (`solo:solo-reviewer`, Sonnet, rea
 
 - Tests run by the checker: .venv/bin/pytest -q: 163 passed, 1 skipped
 - Gap: All ACs are tested, but the §4 Interfaces table is corrupted (single-letter rows). Regenerate it.
+- Fixed 2026-11-10 (v1.1): §4 rebuilt with one row per interface. The status stays "in review" until the owner approves.
