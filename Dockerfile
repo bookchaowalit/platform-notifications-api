@@ -12,6 +12,13 @@ COPY migrations ./migrations
 COPY db ./db
 RUN uv sync --frozen --no-dev --no-editable --no-cache --python /usr/local/bin/python3 \
     && useradd --system --uid 10001 --no-create-home notifications
+# Image hardening: take Debian security fixes newer than the base tag, then drop the base
+# image's pip (the app runs from its installed environment; pip's vendored urllib3/msgpack/
+# setuptools copies are what the Trivy image scan flags).
+RUN apt-get update \
+    && apt-get upgrade -y --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/* \
+    && /usr/local/bin/python3 -m pip uninstall -y --disable-pip-version-check pip
 USER notifications
 # Secrets (database URLs, public key) arrive as environment variables at runtime only.
 # One image for both services: notifications-api (this CMD) and notifications-dispatcher
