@@ -799,6 +799,10 @@ def main() -> None:
         )
     if hosted and issuer == "empire-platform-dev":
         raise SystemExit("hosted mode refuses the dev issuer")
+    from solo_notifications import gateway
+
+    # SPEC-002 (platform-api-gateway): only calls that came through the edge gateway.
+    through_gateway = gateway.GatewayCheck.from_env(gateway.SYSTEM)
     cluster = default_cluster()
     app = create_app(
         lambda: cluster.connect("notifications_api"),
@@ -807,6 +811,7 @@ def main() -> None:
         ),
         HttpPlatform(platform_url),
     )
+    gateway.install(app, through_gateway)
     uvicorn.run(
         app,
         host=os.environ.get("HOST", "0.0.0.0" if hosted else "127.0.0.1"),
