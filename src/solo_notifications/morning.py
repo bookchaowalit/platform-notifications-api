@@ -64,8 +64,15 @@ MONTHS = (
 )
 
 
+MAX_TRIES = 3  # failed sends a day before the digest waits for tomorrow
+
+
 def state_key(day: date) -> str:
     return f"morning-digest:{day.isoformat()}"
+
+
+def failed_key(day: date, n: int) -> str:
+    return f"morning-digest:{day.isoformat()}:failed:{n}"
 
 
 def thai_day(day: date) -> str:
@@ -136,7 +143,8 @@ def status_line(status: dict[str, Any] | None) -> str:
     """One line from the uptime monitor's public /status (own systems only)."""
     if status is None:
         return "ระบบ ⚠️ อ่านสถานะ monitor ไม่ได้"
-    results = [r for r in status.get("results") or [] if isinstance(r, dict)]
+    raw = status.get("results")
+    results = [r for r in raw if isinstance(r, dict)] if isinstance(raw, list) else []
     if not results:
         return "ระบบ ⚠️ monitor ไม่มีข้อมูล"
     down = [str(r.get("name")) for r in results if r.get("status") == "down"]
@@ -272,13 +280,40 @@ class Morning:
         )
 
     def render(self, entries: list[dict[str, Any]], today: date) -> str:
-        return render(entries, self.status(), today, self.board_url)
+        """Never raises on monitor data: a malformed status reads as unreadable."""
+        status = self.status()
+        try:
+            return render(entries, status, today, self.board_url)
+        except Exception:  # noqa: BLE001 - monitor JSON of an unexpected shape
+            return render(entries, None, today, self.board_url)
 
     def due(self, notes: Any, local_now: datetime) -> bool:
-        """Past the morning hour and no digest recorded today (a failed lookup means not due)."""
+        """Past the morning hour, no digest recorded today and fewer than MAX_TRIES failed sends today
+        (a failed lookup means not due)."""
         if local_now.hour < self.hour:
             return False
-        return notes.lookup(state_key(local_now.date())) is None
+        day = local_now.date()
+        if notes.lookup(state_key(day)) is not None:
+            return False
+        return notes.lookup(failed_key(day, MAX_TRIES)) is None
+
+    def mark_failed(self, notes: Any, local_now: datetime) -> None:
+        """Record one failed send today; after MAX_TRIES the digest waits for tomorrow."""
+        day = local_now.date()
+        for n in range(1, MAX_TRIES + 1):
+            if notes.lookup(failed_key(day, n)) is None:
+                notes.queue(
+                    {
+                        "notification_type": STATE_TYPE,
+                        "channel": "console",
+                        "severity": "warning",
+                        "title": f"Morning digest {day.isoformat()} failed ({n}/{MAX_TRIES})",
+                        "message": "Internal marker: a morning digest send failed; never delivered.",
+                        "dedupe_key": failed_key(day, n),
+                        "metadata": {"failed_at": local_now.isoformat(), "try": n},
+                    }
+                )
+                return
 
     def mark(self, notes: Any, local_now: datetime, count: int) -> None:
         notes.queue(
