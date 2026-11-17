@@ -140,7 +140,12 @@ def status_line(status: dict[str, Any] | None) -> str:
     if not results:
         return "ระบบ ⚠️ monitor ไม่มีข้อมูล"
     down = [str(r.get("name")) for r in results if r.get("status") == "down"]
-    stale = [r for r in results if r.get("status") != "down" and r.get("stale")]
+    # Not checked yet, stale, or any status other than up/down: no evidence it works.
+    stale = [
+        r
+        for r in results
+        if r.get("status") != "down" and (r.get("stale") or r.get("status") != "up")
+    ]
     up = sum(1 for r in results if r.get("status") == "up" and not r.get("stale"))
     if not down and not stale:
         return f"ระบบ ✅ ปกติ {up}/{len(results)}"

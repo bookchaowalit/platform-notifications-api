@@ -182,7 +182,9 @@ class Notifications:
         )["items"]
         return items[0] if items else None
 
-    def pending(self, kinds: list[str], since: str) -> list[dict[str, Any]]:
+    def pending(
+        self, kinds: list[str], since: str, offset: int = 0
+    ) -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = self.http.call(
             "GET",
             "/v1/notifications",
@@ -193,8 +195,19 @@ class Notifications:
                 "since": since,
                 "order": "asc",
                 "limit": 500,
+                **({"offset": offset} if offset else {}),
             },
         )["items"]
+        return items
+
+    def pending_all(self, kinds: list[str], since: str) -> list[dict[str, Any]]:
+        """Every pending entry of these kinds (paged; at most 20 pages)."""
+        items: list[dict[str, Any]] = []
+        for _ in range(20):
+            page = self.pending(kinds, since, offset=len(items))
+            items.extend(page)
+            if len(page) < 500:
+                break
         return items
 
     def delivered_reminders(self, task_id: int) -> list[dict[str, Any]]:
@@ -437,7 +450,10 @@ def run_rules(
     *,
     dry_run: bool,
     force: bool = False,
+    current: list[dict[str, Any]] | None = None,
 ) -> dict[str, int]:
+    """Evaluate due rules and queue their matches. ``current`` collects every match
+    (the live task picture the morning digest shows)."""
     counts = {"rules": 0, "matched": 0, "queued": 0, "errors": 0}
     bangkok_day = now.astimezone(BANGKOK).date().isoformat()
     for rule in notes.rules():
@@ -463,6 +479,8 @@ def run_rules(
             )
             continue
         counts["matched"] += len(matches)
+        if current is not None:
+            current.extend(matches)
         queued, failed = 0, False
         for m in matches:
             parts = [
@@ -618,18 +636,24 @@ def deliver(
     clock: Callable[[], datetime] | None = None,
     morning: Morning | None = None,
     morning_due: bool = False,
+    current: list[dict[str, Any]] | None = None,
 ) -> dict[str, int]:
     """Send what is pending. With ``morning``, task kinds other than explicit reminders
     wait for the morning digest (sent when ``morning_due``) instead of going out every run."""
     counts = {"delivered": 0, "failed": 0, "waiting": 0, "errors": 0}
     since = (now - timedelta(days=2)).isoformat()
-    task_entries = notes.pending(list(TASK_KINDS), since)
     held: list[dict[str, Any]] = []
-    if morning is not None:
-        held = [e for e in task_entries if e["notification_type"] in MORNING_KINDS]
-        task_entries = [
-            e for e in task_entries if e["notification_type"] not in MORNING_KINDS
-        ]
+    if morning is None:
+        task_entries = notes.pending(list(TASK_KINDS), since)
+    else:  # held kinds never crowd reminders out of a page
+        task_entries = notes.pending(
+            [k for k in TASK_KINDS if k not in MORNING_KINDS], since
+        )
+        held = (
+            notes.pending_all(list(MORNING_KINDS), since)
+            if morning_due
+            else notes.pending(list(MORNING_KINDS), since)
+        )
     # Whole-message kinds: an engagement review and the daily platform check (warning/breach) from empire-platform.
     reviews = notes.pending(list(WHOLE_MESSAGE_KINDS), since)
     if send is None or quiet(now) or dry_run:
@@ -638,7 +662,7 @@ def deliver(
     batches = []
     if morning is not None:
         if morning_due:
-            _send_morning(notes, send, now, morning, held, counts)
+            _send_morning(notes, send, now, morning, held, current, counts)
         else:
             counts["waiting"] += len(held)
     if task_entries:
@@ -697,31 +721,22 @@ def deliver(
     return counts
 
 
-def _queued_on(entry: dict[str, Any], day: Any) -> bool:
-    raw = entry.get("sent_at")
-    if not raw:
-        return True
-    try:
-        stamp = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))  # noqa: FURB162 - API returns Z
-    except ValueError:
-        return True
-    return bool(stamp.astimezone(BANGKOK).date() == day)
-
-
 def _send_morning(
     notes: Notifications,
     send: Callable[[str], None],
     now: datetime,
     morning: Morning,
     held: list[dict[str, Any]],
+    current: list[dict[str, Any]] | None,
     counts: dict[str, int],
 ) -> None:
     """The morning digest: one message, every held entry recorded, then today's marker."""
     local = now.astimezone(BANGKOK)
-    # The rules were evaluated just before this run, so today's entries are the current
-    # picture; older pending ones (a task closed since) are recorded but not listed.
-    fresh = [e for e in held if _queued_on(e, local.date())]
-    text = morning.render(fresh, local.date())
+    # The digest lists this run's evaluation (every rule, just now), not the queue:
+    # an entry queued earlier for a task closed since is recorded but not shown.
+    source = current if current is not None else held
+    shown = [m for m in source if m["notification_type"] in MORNING_KINDS]
+    text = morning.render(shown, local.date())
     try:
         send(text)
     except RuntimeError as exc:
@@ -791,12 +806,18 @@ def main(argv: list[str] | None = None) -> int:
             _log("morning_lookup_failed", error=type(exc).__name__)
     rules = {"rules": 0, "matched": 0, "queued": 0, "errors": 0}
     monitor = {"enabled": False, "matched": 0, "queued": 0, "errors": 0}
+    current: list[dict[str, Any]] = []
     try:
-        rules = run_rules(notes, tasks, now, dry_run=args.dry_run, force=morning_due)
+        rules = run_rules(
+            notes, tasks, now, dry_run=args.dry_run, force=morning_due, current=current
+        )
     except (ApiError, OSError, urllib.error.URLError) as exc:
         capture(exc)
         rules["errors"] += 1
         _log("rules_failed", error=type(exc).__name__)
+    if morning_due and rules["errors"]:  # an incomplete picture waits for the next run
+        morning_due = False
+        _log("morning_postponed", errors=rules["errors"])
     try:
         monitor = run_tibo_monitor(notes, now, dry_run=args.dry_run)
     except Exception as exc:  # noqa: BLE001 - preserve existing delivery even if monitor setup fails
@@ -812,6 +833,7 @@ def main(argv: list[str] | None = None) -> int:
             tasks=tasks,
             morning=morning,
             morning_due=morning_due,
+            current=current,
         )
     except (ApiError, OSError, urllib.error.URLError) as exc:
         capture(exc)

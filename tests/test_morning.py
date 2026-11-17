@@ -159,21 +159,99 @@ def test_from_env():
     assert morning.fetch_status("http://insecure.example") is None
 
 
-def test_entries_from_an_earlier_day_are_recorded_but_not_listed():
+def test_the_digest_shows_the_current_evaluation_not_stale_queue_entries():
     notes, _ = setup([task(2, status="blocked", title="Deploy")], kinds=("blocked",))
     notes.entries.append(
         {
             "id": len(notes.entries) + 1,
-            "notification_type": "overdue",
+            "notification_type": "blocked",
             "task_id": 9,
-            "task_title": "Closed yesterday",
-            "sent_at": "2026-11-16T03:00:00Z",
+            "task_title": "Closed since 07:00",
             "delivered_at": None,
             "delivery_attempts": 0,
         }
     )
+    current = []
+    dispatch.run_rules(
+        notes,
+        FakeTasks([task(2, status="blocked", title="Deploy")]),
+        MORNING,
+        dry_run=False,
+        force=True,
+        current=current,
+    )
     sent = []
-    counts = run(notes, sent, MORNING, morning.Morning(status=lambda: UP))
-    assert "Closed yesterday" not in sent[0]
+    counts = dispatch.deliver(
+        notes,
+        sent.append,
+        MORNING,
+        dry_run=False,
+        clock=lambda: MORNING,
+        morning=morning.Morning(status=lambda: UP),
+        morning_due=True,
+        current=current,
+    )
+    assert "Closed since 07:00" not in sent[0]
     assert "• Deploy" in sent[0]
-    assert counts["delivered"] == 2
+    assert counts["delivered"] == 2  # the stale entry is recorded, not resent tomorrow
+
+
+def test_unknown_targets_are_not_reported_as_healthy():
+    status = {"results": [{"name": "new", "status": "unknown", "stale": False}]}
+    assert morning.status_line(status) == "ระบบ ⚪ ไม่ได้เช็ค 1 · ✅ ปกติ 0"
+
+
+def test_pending_all_reads_every_page():
+    class Http:
+        def __init__(self):
+            self.offsets = []
+
+        def call(self, method, path, body=None, params=None):
+            offset = params.get("offset") or 0
+            self.offsets.append(offset)
+            size = 500 if offset < 1000 else 3
+            return {"items": [{"id": offset + n} for n in range(size)]}
+
+    http = Http()
+    items = dispatch.Notifications(http).pending_all(["overdue"], "2026-11-15")
+    assert len(items) == 1003
+    assert http.offsets == [0, 500, 1000]
+
+
+def test_main_postpones_the_digest_when_rules_fail(monkeypatch):
+    calls = {}
+
+    class Broken(Notes):
+        def rules(self):
+            raise dispatch.ApiError(503, "GET /v1/notification-rules")
+
+    notes = Broken([])
+    for key in ("EMPIRE_TASKS_API", "EMPIRE_NOTIFICATIONS_API"):
+        monkeypatch.setenv(key, "https://example.test")
+    monkeypatch.setenv("NOTIFICATIONS_DISPATCH_TOKEN", "fake")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "1:abc")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "1")
+    monkeypatch.setattr(dispatch, "Notifications", lambda _http: notes)
+    monkeypatch.setattr(dispatch, "Tasks", lambda _http: FakeTasks([]))
+    monkeypatch.setattr(dispatch, "telegram_sender", lambda *_a: [].append)
+    monkeypatch.setattr(
+        dispatch,
+        "run_tibo_monitor",
+        lambda *_a, **_k: {"enabled": False, "matched": 0, "queued": 0, "errors": 0},
+    )
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return MORNING
+
+    monkeypatch.setattr(dispatch, "datetime", Clock)
+
+    def deliver(*_a, **kw):
+        calls.update(kw)
+        return {"delivered": 0, "failed": 0, "waiting": 0, "errors": 0}
+
+    monkeypatch.setattr(dispatch, "deliver", deliver)
+    dispatch.main([])
+    assert calls["morning"] is not None
+    assert calls["morning_due"] is False
