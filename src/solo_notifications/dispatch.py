@@ -662,7 +662,9 @@ def deliver(
     batches = []
     if morning is not None:
         if morning_due:
-            _send_morning(notes, send, now, morning, held, current, counts)
+            _send_morning(
+                notes, send, now, morning, held, current, counts, clock or _utcnow
+            )
         else:
             counts["waiting"] += len(held)
     if task_entries:
@@ -721,6 +723,10 @@ def deliver(
     return counts
 
 
+def _utcnow() -> datetime:
+    return datetime.now(UTC)
+
+
 def _send_morning(
     notes: Notifications,
     send: Callable[[str], None],
@@ -729,6 +735,7 @@ def _send_morning(
     held: list[dict[str, Any]],
     current: list[dict[str, Any]] | None,
     counts: dict[str, int],
+    clock: Callable[[], datetime],
 ) -> None:
     """The morning digest: one message, every held entry recorded, then today's marker."""
     local = now.astimezone(BANGKOK)
@@ -737,10 +744,17 @@ def _send_morning(
     source = current if current is not None else held
     shown = [m for m in source if m["notification_type"] in MORNING_KINDS]
     text = morning.render(shown, local.date())
+    if quiet(
+        clock()
+    ):  # a slow run that reaches quiet hours sends nothing, marks nothing
+        counts["waiting"] += len(held)
+        return
     try:
         send(text)
     except RuntimeError as exc:
         _report_once("send_failed", exc)
+        counts["errors"] += 1  # the message failed even on a day with no task entries
+        _log("morning_send_failed", detail=str(exc))
         for e in held:
             _record(notes, e, "failed", counts, error=str(exc))
         counts["failed"] += len(held)

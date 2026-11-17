@@ -255,3 +255,39 @@ def test_main_postpones_the_digest_when_rules_fail(monkeypatch):
     dispatch.main([])
     assert calls["morning"] is not None
     assert calls["morning_due"] is False
+
+
+def test_the_digest_waits_when_the_run_reaches_quiet_hours():
+    notes, _ = setup([task(2, status="blocked")])
+    late = datetime(2026, 11, 17, 15, 0, tzinfo=UTC)  # 22:00 Bangkok
+    sent = []
+    counts = dispatch.deliver(
+        notes,
+        sent.append,
+        MORNING,
+        dry_run=False,
+        clock=lambda: late,
+        morning=morning.Morning(status=lambda: UP),
+        morning_due=True,
+    )
+    assert sent == []
+    assert counts["waiting"] == 1
+    assert notes.lookup(morning.state_key(date(2026, 11, 17))) is None
+
+
+def test_a_failed_digest_on_an_empty_day_is_an_error():
+    notes = Notes([])
+
+    def broken(_text):
+        raise RuntimeError("telegram_http_502")
+
+    counts = dispatch.deliver(
+        notes,
+        broken,
+        MORNING,
+        dry_run=False,
+        clock=lambda: MORNING,
+        morning=morning.Morning(status=lambda: UP),
+        morning_due=True,
+    )
+    assert counts["errors"] == 1
