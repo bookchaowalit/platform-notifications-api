@@ -159,6 +159,34 @@ def status_line(status: dict[str, Any] | None) -> str:
     return "ระบบ " + " · ".join(parts)
 
 
+def jobs_line(status: dict[str, Any] | None) -> str | None:
+    """Scheduled jobs from the monitor's ``jobs`` summary; None when the monitor sends none."""
+    jobs = (status or {}).get("jobs")
+    if not isinstance(jobs, dict):
+        return None
+    late = [str(j) for j in jobs.get("late") or []]
+    failed = [str(j) for j in jobs.get("failed") or []]
+    total = jobs.get("total")
+    if not late and not failed:
+        return (
+            f"งาน cron ✅ ปกติ {total}/{total}"
+            if isinstance(total, int)
+            else "งาน cron ✅ ปกติ"
+        )
+    parts = []
+    if failed:
+        parts.append(
+            f"🔴 ล้ม {len(failed)}: {', '.join(failed[:4])}"
+            + (" …" if len(failed) > 4 else "")
+        )
+    if late:
+        parts.append(
+            f"🟡 ไม่รายงาน {len(late)}: {', '.join(late[:4])}"
+            + (" …" if len(late) > 4 else "")
+        )
+    return "งาน cron " + " · ".join(parts)
+
+
 def render(
     entries: list[dict[str, Any]],
     status: dict[str, Any] | None,
@@ -169,6 +197,7 @@ def render(
         f"☀️ สรุปเช้า {thai_day(today)}",
         "",
         status_line(status),
+        *([jobs] if (jobs := jobs_line(status)) else []),
         "",
         *task_lines(entries, today),
     ]

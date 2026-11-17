@@ -291,3 +291,23 @@ def test_a_failed_digest_on_an_empty_day_is_an_error():
         morning_due=True,
     )
     assert counts["errors"] == 1
+
+
+def test_jobs_line_names_late_and_failed_jobs():
+    assert morning.jobs_line(UP) is None  # an older monitor sends no summary
+    ok = {**UP, "jobs": {"total": 25, "late": [], "failed": []}}
+    assert morning.jobs_line(ok) == "งาน cron ✅ ปกติ 25/25"
+    bad = {
+        **UP,
+        "jobs": {
+            "total": 25,
+            "late": ["posture-monitor"],
+            "failed": ["credits-worker"],
+        },
+    }
+    assert (
+        morning.jobs_line(bad)
+        == "งาน cron 🔴 ล้ม 1: credits-worker · 🟡 ไม่รายงาน 1: posture-monitor"
+    )
+    text = morning.render([], bad, date(2026, 11, 17))
+    assert "ระบบ ✅ ปกติ 3/3\nงาน cron 🔴 ล้ม 1" in text
