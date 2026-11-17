@@ -78,14 +78,17 @@ class FakeNotes:
             and e["delivered_at"]
         ]
 
-    def pending(self, kinds, since):
+    def pending(self, kinds, since, offset=0):
         return [
             e
             for e in self.entries
             if e["notification_type"] in kinds
             and not e["delivered_at"]
             and e["delivery_attempts"] < dispatch.MAX_ATTEMPTS
-        ]
+        ][offset:]
+
+    def pending_all(self, kinds, since):
+        return self.pending(kinds, since)
 
     def record(self, entry_id, outcome, *, channel=None, error=None):
         if entry_id in getattr(self, "broken", ()):
