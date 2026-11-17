@@ -309,5 +309,7 @@ def test_jobs_line_names_late_and_failed_jobs():
         morning.jobs_line(bad)
         == "งาน cron 🔴 ล้ม 1: credits-worker · 🟡 ไม่รายงาน 1: posture-monitor"
     )
+    counts = {**UP, "jobs": {"total": 25, "late": 2, "failed": 0}}
+    assert morning.jobs_line(counts) == "งาน cron 🟡 ไม่รายงาน 2"
     text = morning.render([], bad, date(2026, 11, 17))
     assert "ระบบ ✅ ปกติ 3/3\nงาน cron 🔴 ล้ม 1" in text
