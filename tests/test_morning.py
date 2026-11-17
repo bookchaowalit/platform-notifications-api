@@ -313,3 +313,24 @@ def test_jobs_line_names_late_and_failed_jobs():
     assert morning.jobs_line(counts) == "งาน cron 🟡 ไม่รายงาน 2"
     text = morning.render([], bad, date(2026, 11, 17))
     assert "ระบบ ✅ ปกติ 3/3\nงาน cron 🔴 ล้ม 1" in text
+
+
+def test_a_broken_status_response_never_raises(monkeypatch):
+    import http.client
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_a):
+            return False
+
+        def read(self, _n):
+            raise http.client.IncompleteRead(b"{", 10)
+
+    class Opener:
+        def open(self, *_a, **_k):
+            return Response()
+
+    monkeypatch.setattr(morning.urllib.request, "build_opener", lambda *_a: Opener())
+    assert morning.fetch_status("https://monitor.example/status") is None

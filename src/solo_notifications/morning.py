@@ -229,7 +229,7 @@ def fetch_status(url: str, timeout: float = 10.0) -> dict[str, Any] | None:
     try:
         with opener.open(request, timeout=timeout) as response:
             data = json.loads(response.read(2_000_000))
-    except (OSError, urllib.error.URLError, ValueError):
+    except Exception:  # noqa: BLE001 - IncompleteRead, bad JSON, anything: the digest says "unreadable"
         return None
     return data if isinstance(data, dict) else None
 
