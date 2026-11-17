@@ -42,6 +42,19 @@ is logged and skipped. Variables (Railway only): `EMPIRE_TASKS_API`,
 `reminder-worker` automation token; rotate with the other cell tokens),
 `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`.
 
+### Morning digest
+
+Task notifications other than explicit reminders (overdue, due_soon, high_priority,
+stale, blocked) are not sent every run any more. The first run at or after 08:00
+Bangkok evaluates every active rule, then sends one `☀️ สรุปเช้า` message: a line
+from the uptime monitor's public `/status` and today's tasks, each task once under
+its most urgent kind (⛔ blocked, ⏰ overdue, 📅 due soon, 🔥 high priority, 🕸️ stale
+as a count), at most five per section. A console-only `morning_digest_state` entry
+(`dedupe_key` `morning-digest:<day>`) keeps it to once a day. Explicit reminders
+still go out on the next run as `🔔 เตือนงาน`. Optional variables:
+`MORNING_DIGEST=off` (old behaviour), `MORNING_DIGEST_HOUR` (7–21),
+`MORNING_STATUS_URL`, `MORNING_BOARD_URL` (adds a `→ ดูทั้งหมด` link).
+
 ## Tibo reset alerts (opt-in)
 
 The existing `notifications-dispatcher` can monitor Tibo (`@thsottiaux`)
