@@ -160,12 +160,24 @@ def status_line(status: dict[str, Any] | None) -> str:
 
 
 def jobs_line(status: dict[str, Any] | None) -> str | None:
-    """Scheduled jobs from the monitor's ``jobs`` summary; None when the monitor sends none."""
+    """Scheduled jobs from the monitor's ``jobs`` summary; None when the monitor sends none.
+
+    The public status carries counts; with a token it carries job names instead.
+    """
     jobs = (status or {}).get("jobs")
     if not isinstance(jobs, dict):
         return None
-    late = [str(j) for j in jobs.get("late") or []]
-    failed = [str(j) for j in jobs.get("failed") or []]
+
+    def part(raw: Any) -> tuple[int, str]:
+        if isinstance(raw, list):
+            names = [str(j) for j in raw]
+            return len(names), (
+                ": " + ", ".join(names[:4]) + (" …" if len(names) > 4 else "")
+            ) if names else ""
+        return (raw if isinstance(raw, int) and raw > 0 else 0), ""
+
+    failed, failed_names = part(jobs.get("failed"))
+    late, late_names = part(jobs.get("late"))
     total = jobs.get("total")
     if not late and not failed:
         return (
@@ -175,15 +187,9 @@ def jobs_line(status: dict[str, Any] | None) -> str | None:
         )
     parts = []
     if failed:
-        parts.append(
-            f"🔴 ล้ม {len(failed)}: {', '.join(failed[:4])}"
-            + (" …" if len(failed) > 4 else "")
-        )
+        parts.append(f"🔴 ล้ม {failed}{failed_names}")
     if late:
-        parts.append(
-            f"🟡 ไม่รายงาน {len(late)}: {', '.join(late[:4])}"
-            + (" …" if len(late) > 4 else "")
-        )
+        parts.append(f"🟡 ไม่รายงาน {late}{late_names}")
     return "งาน cron " + " · ".join(parts)
 
 
