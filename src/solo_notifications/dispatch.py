@@ -758,10 +758,17 @@ def _send_morning(
         for e in held:
             _record(notes, e, "failed", counts, error=str(exc))
         counts["failed"] += len(held)
+        try:  # bounds the retries: after MAX_TRIES the digest waits for tomorrow
+            morning.mark_failed(notes, local)
+        except ApiError as mark_exc:
+            _log("morning_mark_failed", detail=str(mark_exc))
         return
+    # The message went out: every held entry it covers is recorded, and the digest counts as one
+    # delivery even on a day whose entries had all used up their attempts.
     for e in held:
         _record(notes, e, "delivered", counts, channel="telegram")
     counts["delivered"] += len(held)
+    counts["morning_sent"] = counts.get("morning_sent", 0) + 1
     try:
         morning.mark(notes, local, len(held))
     except ApiError as exc:  # the next run may send the digest again; never skip it

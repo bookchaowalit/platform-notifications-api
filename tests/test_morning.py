@@ -334,3 +334,31 @@ def test_a_broken_status_response_never_raises(monkeypatch):
 
     monkeypatch.setattr(morning.urllib.request, "build_opener", lambda *_a: Opener())
     assert morning.fetch_status("https://monitor.example/status") is None
+
+
+def test_malformed_monitor_json_reads_as_unreadable():
+    m = morning.Morning(status=lambda: {"results": 1, "jobs": {"late": 5}})
+    text = m.render([], date(2026, 11, 17))
+    assert "ระบบ ⚠️" in text
+
+
+def test_the_digest_gives_up_for_the_day_after_three_failed_sends():
+    notes = Notes([])
+    m = morning.Morning(status=lambda: UP)
+
+    def broken(_text):
+        raise RuntimeError("telegram_http_502")
+
+    local = MORNING.astimezone(dispatch.BANGKOK)
+    for _ in range(morning.MAX_TRIES):
+        assert m.due(notes, local)
+        dispatch.deliver(
+            notes,
+            broken,
+            MORNING,
+            dry_run=False,
+            clock=lambda: MORNING,
+            morning=m,
+            morning_due=True,
+        )
+    assert not m.due(notes, local)
