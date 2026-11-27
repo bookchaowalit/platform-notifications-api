@@ -1,5 +1,9 @@
 # 01 — Business process (As-Is / To-Be)
 
+platform-notifications-api คือ API และ dispatcher ที่แปลงกฎแจ้งเตือนของงาน (task) เป็นรายการแจ้งเตือน แล้วส่งทาง Telegram ให้ owner ผ่าน Railway cron ทุก 30 นาที โดยเว้นช่วง quiet hours
+
+Last reviewed: 2026-11-27 · commit `e8c0c25`
+
 ## As-Is: จากงาน (task) ถึงข้อความ Telegram (ตามโค้ดวันนี้)
 
 ทุก 30 นาที Railway cron รัน `notifications-dispatch` หนึ่งครั้ง: (1) ประเมินกฎที่ active และถึงรอบ (2) Tibo reset monitor ถ้าเปิด (3) ส่งรายการที่ค้างทาง Telegram นอก quiet hours
@@ -43,9 +47,9 @@ Sources: `src/solo_notifications/dispatch.py` (`main`, `run_rules`, `evaluate`, 
 ข้อเท็จจริงสำคัญจากโค้ด:
 
 - quiet hours = 22:00–07:00 Asia/Bangkok (`QUIET = (22, 7)`) ตรวจก่อนส่ง **ทุก batch** (`quiet(clock())`) ไม่ใช่แค่ตอนเริ่ม
-- `MAX_ATTEMPTS = 3` ใช้เป็นตัวกรอง `max_attempts` ตอนดึง pending: entry ที่ล้มเหลวครบ 3 ครั้งจะไม่ถูกหยิบอีก (ไม่มีการแจ้งเตือนแยก)
-- pending ดึงเฉพาะ `sent_at` ภายใน 2 วันที่ผ่านมา: entry ที่ค้างเกิน 2 วันไม่ถูกส่งอีก (gap: ไม่มีการรายงาน)
-- กฎ `status_change` มีใน schema / API แต่ `evaluate()` คืน `[]` สำหรับชนิดนี้ (gap: ยังไม่ implement ใน dispatcher)
+- `MAX_ATTEMPTS = 3` ใช้เป็นตัวกรอง `max_attempts` ตอนดึง pending: entry ที่ล้มเหลวครบ 3 ครั้งจะไม่ถูกหยิบอีก (ไม่มีการแจ้งเตือนแยก; ดู G1)
+- pending ดึงเฉพาะ `sent_at` ภายใน 2 วันที่ผ่านมา: entry ที่ค้างเกิน 2 วันไม่ถูกส่งอีก (ดู G2)
+- กฎ `status_change` มีใน schema / API แต่ `evaluate()` คืน `[]` สำหรับชนิดนี้ (ดู G3)
 
 ## As-Is: Tibo reset monitor (opt-in)
 
@@ -73,8 +77,16 @@ Sources: `src/solo_notifications/tibo_reset.py` (`Settings.from_env`, `fetch_pos
 - `PRODUCT.md` §Capabilities: out of scope = ช่องทางอื่นนอก Telegram และ preference ต่อคน
 - `specs/001-l2-baseline/spec.md`: ไม่มีพฤติกรรมใหม่ (tooling, lock, tests เท่านั้น); รีวิว 2026-10-24 ขอให้แก้ตาราง §4 ที่เสีย
 
+## Gap
+
+| ID | As-Is → To-Be | Status | Owner | Evidence |
+|---|---|---|---|---|
+| G1 | entry ที่ล้มเหลวครบ 3 ครั้งถูกหยุดหยิบโดยไม่แจ้ง → เป้า 0 entry ที่ค้างล้มเหลวครบ 3 ครั้ง | todo | claude | `PRODUCT.md` §Measures; `MAX_ATTEMPTS = 3` ใน `src/solo_notifications/dispatch.py` |
+| G2 | entry ที่ค้างเกิน 2 วันไม่ถูกส่งและไม่ถูกรายงาน → due reminders ทั้งหมดถูกส่งภายใน 1 รอบนอก quiet hours | todo | claude | `PRODUCT.md` §Measures; `since = now - 2 days` ใน `dispatch.py` |
+| G3 | กฎ `status_change` มีใน schema แต่ `evaluate()` คืน `[]` → dispatcher รองรับหรือเอาชนิดนี้ออก | decide | owner | `migrations/0001_notifications.sql`; `dispatch.py` `evaluate` |
+| G4 | Tibo reset monitor ปิดเป็นค่าเริ่มต้น และไม่ยืนยันสถานะ production → owner ตัดสินว่าเปิดใน production | decide | owner | `PRODUCT.md` [ต้องยืนยัน]; `src/solo_notifications/tibo_reset.py` |
+| G5 | ไม่มี To-Be ของกระบวนการ (channel ใหม่, การแจ้งเมื่อ entry ล้มเหลว) → owner กำหนด | decide | owner | ไม่มีใน `PRODUCT.md` / `specs/` |
+
 ## Open questions
 
-- To-Be ของกระบวนการ (เช่น channel ใหม่, การแจ้งเมื่อ entry ล้มเหลวครบ 3 ครั้ง, การจัดการ entry ที่เกิน 2 วัน) ไม่มีใน PRODUCT.md / specs / issues — ต้องให้ owner กำหนด
-- กฎ `status_change` ตั้งใจให้ dispatcher รองรับหรือไม่ (ตอนนี้ถูกข้ามแบบเงียบ)
 - `TIBO_RESET_MONITOR_ENABLED` ใน production เปิดอยู่หรือไม่ (PRODUCT.md ระบุ `[ต้องยืนยัน]`; registry บอกว่า staged แต่ยังไม่ live)
